@@ -1,10 +1,10 @@
+import os
 from typing import Any, Dict, List, Tuple
-
 import hydra
 import rootutils
-from lightning import LightningDataModule, LightningModule, Trainer
+from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 # ------------------------------------------------------------------------------------ #
@@ -28,6 +28,7 @@ from src.utils import (
     RankedLogger,
     extras,
     instantiate_loggers,
+    instantiate_callbacks,
     log_hyperparameters,
     task_wrapper,
 )
@@ -45,7 +46,18 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     :param cfg: DictConfig configuration composed by Hydra.
     :return: Tuple[dict, dict] with metrics and dict with all instantiated objects.
     """
-    assert cfg.ckpt_path
+
+    if not cfg.ckpt_path:
+        log.warning("ckpt_path is not defined. Lightning Trainer is not handling checkpointing restoration.")
+
+    # check if model.pytorch_ckpt_path is defined
+    if OmegaConf.select(cfg, "model.pytorch_ckpt_path") and cfg.ckpt_path is not None:
+        log.error('Error: Both `model.pytorch_ckpt_path` and `ckpt_path` are defined. ')
+        return {}, {}
+    elif OmegaConf.select(cfg, "model.pytorch_ckpt_path") is None and not cfg.ckpt_path:
+        log.error('Error: No checkpoint path is defined for either Lightning trainer or vanilla Pytorch. ')
+        return {}, {}
+
 
     log.info(f"Instantiating datamodule <{cfg.data._target_}>")
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
@@ -53,11 +65,14 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     log.info(f"Instantiating model <{cfg.model._target_}>")
     model: LightningModule = hydra.utils.instantiate(cfg.model)
 
+    log.info("Instantiating callbacks...")
+    callbacks: List[Callback] = instantiate_callbacks(cfg.get("callbacks"))
+
     log.info("Instantiating loggers...")
     logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
 
     log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
-    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, logger=logger)
+    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=logger)
 
     object_dict = {
         "cfg": cfg,
@@ -89,9 +104,7 @@ def main(cfg: DictConfig) -> None:
     :param cfg: DictConfig configuration composed by Hydra.
     """
     # apply extra utilities
-    # (e.g. ask for tags if none are provided in cfg, print cfg tree, etc.)
-    extras(cfg)
-
+    extras(cfg)  # (e.g. ask for tags if none are provided in cfg, print cfg tree, etc.)
     evaluate(cfg)
 
 

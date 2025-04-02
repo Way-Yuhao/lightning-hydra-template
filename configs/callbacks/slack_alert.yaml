@@ -1,0 +1,6 @@
+slack_alert:
+  _target_: src.callbacks.SlackAlert
+  disabled: false
+  ignore_keyboard_interrupt: true
+  at_epoch: null
+  at_global_step: 130000
