@@ -1,1 +1,1 @@
-from slack_alert import SlackAlert
+from .slack_alert import SlackAlert
